@@ -159,6 +159,7 @@ abstract class TSaslTransport extends TTransport {
     EncodingUtils.encodeBigEndian(payload.length, messageHeader, STATUS_BYTES);
 
     if (LOGGER.isDebugEnabled())
+      LOGGER.debug("THIS IS JOE BUCK's code");
       LOGGER.debug(getRole() + ": Writing message with status {} and payload length {}",
                    status, payload.length);
     underlyingTransport.write(messageHeader);
@@ -175,17 +176,24 @@ abstract class TSaslTransport extends TTransport {
    *           transport, or if a status code of BAD or ERROR is encountered.
    */
   protected SaslResponse receiveSaslMessage() throws TTransportException {
-    underlyingTransport.readAll(messageHeader, 0, messageHeader.length);
+    try {
+      underlyingTransport.readAll(messageHeader, 0, messageHeader.length);
+    } catch (TTransportException e) {
+      LOGGER.debug("Joe, caught TTE with type: " + e.getType() + " and message: " + e.getMessage() + " and cause: " + e.getCause());
+      throw new TTransportException("Joe did this");
+    }
 
     byte statusByte = messageHeader[0];
 
     NegotiationStatus status = NegotiationStatus.byValue(statusByte);
     if (status == null) {
+      LOGGER.debug("Negotiation status is null");
       throw sendAndThrowMessage(NegotiationStatus.ERROR, "Invalid status " + statusByte);
     }
 
     int payloadBytes = EncodingUtils.decodeBigEndian(messageHeader, STATUS_BYTES);
     if (payloadBytes < 0 || payloadBytes > 104857600 /* 100 MB */) {
+      LOGGER.debug("invalid payload header length");
       throw sendAndThrowMessage(
         NegotiationStatus.ERROR, "Invalid payload header length: " + payloadBytes);
     }
@@ -196,8 +204,10 @@ abstract class TSaslTransport extends TTransport {
     if (status == NegotiationStatus.BAD || status == NegotiationStatus.ERROR) {
       try {
         String remoteMessage = new String(payload, "UTF-8");
+        LOGGER.debug("Peer failure");
         throw new TTransportException("Peer indicated failure: " + remoteMessage);
       } catch (UnsupportedEncodingException e) {
+        LOGGER.debug("Unsupported encoding exception");
         throw new TTransportException(e);
       }
     }
@@ -270,13 +280,14 @@ abstract class TSaslTransport extends TTransport {
       // initial response, or an empty one.
       handleSaslStartMessage();
       readSaslHeader = true;
-      LOGGER.debug("{}: Start message handled", getRole());
+      LOGGER.info("{}: Start message handled", getRole());
 
       SaslResponse message = null;
       while (!sasl.isComplete()) {
         message = receiveSaslMessage();
         if (message.status != NegotiationStatus.COMPLETE &&
             message.status != NegotiationStatus.OK) {
+          LOGGER.warn("message.status is no good: " + message.status);
           throw new TTransportException("Expected COMPLETE or OK, got " + message.status);
         }
 
@@ -286,14 +297,15 @@ abstract class TSaslTransport extends TTransport {
         // send back any further response.
         if (message.status == NegotiationStatus.COMPLETE &&
             getRole() == SaslRole.CLIENT) {
-          LOGGER.debug("{}: All done!", getRole());
+          LOGGER.info("{}: All done!", getRole());
           break;
         }
 
+        LOGGER.warn("Sending another sasl message");
         sendSaslMessage(sasl.isComplete() ? NegotiationStatus.COMPLETE : NegotiationStatus.OK,
                         challenge);
       }
-      LOGGER.debug("{}: Main negotiation loop complete", getRole());
+      LOGGER.info("{}: Main negotiation loop complete", getRole());
 
       assert sasl.isComplete();
 
@@ -323,6 +335,7 @@ abstract class TSaslTransport extends TTransport {
        * type of exception so we can handle this scenario differently.
        */
       if (!readSaslHeader && e.getType() == TTransportException.END_OF_FILE) {
+        LOGGER.error("TTransportException hit, Joe", e);
         underlyingTransport.close();
         LOGGER.debug("No data or no sasl data in the stream");
         throw new TSaslTransportException("No data or no sasl data in the stream");
